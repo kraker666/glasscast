@@ -1,0 +1,53 @@
+# XcodeGen spec for GlassCast. CI runs `xcodegen generate` in /App to produce
+# GlassCast.xcodeproj (there is no Mac to maintain a hand-edited .pbxproj).
+# Settings mirror Meta's CameraAccess sample (iOS 17.2, Swift 6, DAT 1.0.1).
+name: GlassCast
+options:
+  deploymentTarget:
+    iOS: "17.2"
+  createIntermediateGroups: true
+packages:
+  MetaWearablesDAT:
+    # Same URL and pin as the CameraAccess sample. GitHub redirects it to meta/meta-wearables-dat-ios.
+    url: https://github.com/facebook/meta-wearables-dat-ios
+    exactVersion: 1.0.1
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    MARKETING_VERSION: "1.0"
+    CURRENT_PROJECT_VERSION: "1"
+targets:
+  GlassCast:
+    type: application
+    platform: iOS
+    sources:
+      - path: GlassCast
+        excludes:
+          - "Info.plist"
+          - "GlassCast.entitlements"
+    settings:
+      base:
+        PRODUCT_NAME: GlassCast
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.xb021012.glasscast
+        INFOPLIST_FILE: GlassCast/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        CODE_SIGN_ENTITLEMENTS: GlassCast/GlassCast.entitlements
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: ""
+        TARGETED_DEVICE_FAMILY: "1"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ENABLE_PREVIEWS: NO
+    dependencies:
+      - package: MetaWearablesDAT
+        product: MWDATCore
+      - package: MetaWearablesDAT
+        product: MWDATCamera
+schemes:
+  GlassCast:
+    build:
+      targets:
+        GlassCast: all
+    run:
+      config: Debug
+    archive:
+      config: Release

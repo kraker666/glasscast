@@ -1,0 +1,141 @@
+name: Build IPAs
+
+# Builds two unsigned-for-distribution IPAs for SideStore (it re-signs with a free Apple ID):
+#   CameraAccess.ipa  - Meta's sample, unmodified (milestone M0 risk spike)
+#   GlassCast.ipa     - this app
+# On pushes to main both are attached to the rolling "build-latest" release, so the phone
+# can download them straight from Safari.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  # Commit on meta/meta-wearables-dat-ios main whose samples target DAT 1.0.1 (release tags hold only the SDK).
+  DAT_SAMPLE_REF: "bbae597cd1c748cd29b9375a1624a8d75b1c9e14"
+
+jobs:
+  camera-access-spike:
+    name: CameraAccess sample (M0)
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check out Meta's DAT samples (pinned commit)
+        uses: actions/checkout@v4
+        with:
+          repository: meta/meta-wearables-dat-ios
+          ref: ${{ env.DAT_SAMPLE_REF }}
+          path: dat
+
+      - name: Select Xcode (>= 26.4)
+        run: ci/select-xcode.sh
+
+      - name: Resolve Swift packages
+        run: |
+          xcodebuild -resolvePackageDependencies \
+            -project dat/samples/CameraAccess/CameraAccess.xcodeproj \
+            -scheme CameraAccess
+
+      - name: Build (no code signing)
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -project dat/samples/CameraAccess/CameraAccess.xcodeproj \
+            -scheme CameraAccess \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            | tee build.log | grep -E '(error|warning: .*deprecated|BUILD (SUCCEEDED|FAILED))' || true
+          test -d build/Build/Products/Release-iphoneos/CameraAccess.app
+
+      - name: Package IPA
+        run: ci/package-ipa.sh build/Build/Products/Release-iphoneos/CameraAccess.app ci/sideload.entitlements CameraAccess.ipa
+
+      - name: Upload build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: CameraAccess-build-log
+          path: build.log
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CameraAccess-ipa
+          path: CameraAccess.ipa
+
+  glasscast:
+    name: GlassCast
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode (>= 26.4)
+        run: ci/select-xcode.sh
+
+      - name: Generate Xcode project
+        run: |
+          command -v xcodegen || brew install xcodegen
+          cd App && xcodegen generate
+
+      - name: Resolve Swift packages
+        run: xcodebuild -resolvePackageDependencies -project App/GlassCast.xcodeproj -scheme GlassCast
+
+      - name: Build (no code signing)
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -project App/GlassCast.xcodeproj \
+            -scheme GlassCast \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            CURRENT_PROJECT_VERSION=${{ github.run_number }} \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            | tee build.log | grep -E '(error|BUILD (SUCCEEDED|FAILED))' || true
+          test -d build/Build/Products/Release-iphoneos/GlassCast.app
+
+      - name: Package IPA
+        run: ci/package-ipa.sh build/Build/Products/Release-iphoneos/GlassCast.app ci/sideload.entitlements GlassCast.ipa
+
+      - name: Upload build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: GlassCast-build-log
+          path: build.log
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GlassCast-ipa
+          path: GlassCast.ipa
+
+  release:
+    name: Publish to build-latest release
+    needs: [camera-access-spike, glasscast]
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: ipas
+          merge-multiple: true
+
+      - name: Replace the rolling release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          ls -lh ipas
+          gh release delete build-latest --cleanup-tag --yes || true
+          gh release create build-latest ipas/GlassCast.ipa ipas/CameraAccess.ipa \
+            --target "${{ github.sha }}" \
+            --title "Latest build (#${{ github.run_number }})" \
+            --notes "Built from ${{ github.sha }} by run #${{ github.run_number }}. Install GlassCast.ipa with SideStore. CameraAccess.ipa is Meta's unmodified sample for the M0 test."
