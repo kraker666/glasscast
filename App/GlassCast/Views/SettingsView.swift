@@ -14,12 +14,14 @@ struct SettingsView: View {
 
   @Environment(\.dismiss) private var dismiss
   @State private var draft: StreamSettings
+  @State private var jarvisDraft: JarvisSettings
   @State private var confirmDisconnect = false
 
   init(viewModel: StreamViewModel, wearablesVM: WearablesViewModel) {
     self.viewModel = viewModel
     self.wearablesVM = wearablesVM
     self._draft = State(initialValue: viewModel.settings)
+    self._jarvisDraft = State(initialValue: viewModel.jarvisSettings)
   }
 
   var body: some View {
@@ -68,6 +70,24 @@ struct SettingsView: View {
           }
         }
 
+        Section {
+          TextField("Server URL", text: $jarvisDraft.serverURL)
+            .keyboardType(.URL)
+            .textInputAutocapitalization(.never)
+            .autocorrectionDisabled()
+          SecureField("HMAC secret", text: $jarvisDraft.secret)
+            .textInputAutocapitalization(.never)
+            .autocorrectionDisabled()
+          TextField("Note (optional)", text: $jarvisDraft.note, axis: .vertical)
+            .lineLimit(1...3)
+        } header: {
+          Text("Jarvis capture")
+        } footer: {
+          Text(
+            "\"Send to Jarvis\" posts the current frame as a signed JPEG webhook to this URL. The note is attached to every capture — dictate it with the keyboard's microphone button."
+          )
+        }
+
         Section("Glasses") {
           LabeledContent("Name", value: viewModel.deviceName ?? "Not connected")
           LabeledContent("Battery", value: viewModel.batteryLevel.map { "\($0)%" } ?? "—")
@@ -91,6 +111,9 @@ struct SettingsView: View {
       }
       .navigationTitle("Settings")
       .navigationBarTitleDisplayMode(.inline)
+      .onChange(of: jarvisDraft) { _, newValue in
+        viewModel.applyJarvis(newValue)
+      }
       .toolbar {
         ToolbarItem(placement: .confirmationAction) {
           Button("Done") { dismiss() }

@@ -66,6 +66,13 @@ final class StreamViewModel {
   /// Confirm prompt before the camera-permission redirect to the Meta AI app.
   var showCameraPermissionPrompt: Bool = false
 
+  // MARK: - Jarvis capture sink
+
+  private(set) var jarvisSettings: JarvisSettings
+  private(set) var isSendingToJarvis: Bool = false
+  /// Brief success/failure toast shown over the live view after a send.
+  private(set) var jarvisToast: String?
+
   // MARK: - Derived
 
   var isStreaming: Bool { streamState == .streaming }
@@ -108,6 +115,7 @@ final class StreamViewModel {
   @ObservationIgnored private var deviceMonitorTask: Task<Void, Never>?
   @ObservationIgnored private var appLifecycleTask: Task<Void, Never>?
   @ObservationIgnored private var retryTask: Task<Void, Never>?
+  @ObservationIgnored private var jarvisToastTask: Task<Void, Never>?
   @ObservationIgnored private let sessionTokenBag = ListenerTokenBag()
   @ObservationIgnored private let streamTokenBag = ListenerTokenBag()
   @ObservationIgnored private let deviceTokenBag = ListenerTokenBag()
@@ -130,6 +138,7 @@ final class StreamViewModel {
     self.wearables = wearables
     self.deviceSelector = AutoDeviceSelector(wearables: wearables)
     self.settings = StreamSettings.load()
+    self.jarvisSettings = JarvisSettings.load()
     startDeviceMonitoring()
     startAppLifecycleMonitoring()
   }
@@ -138,6 +147,7 @@ final class StreamViewModel {
     deviceMonitorTask?.cancel()
     appLifecycleTask?.cancel()
     retryTask?.cancel()
+    jarvisToastTask?.cancel()
     deviceSession?.stop()
   }
 
@@ -200,6 +210,48 @@ final class StreamViewModel {
 
   func dismissError() {
     showError = false
+  }
+
+  /// Saves Jarvis capture-sink settings (server URL, secret, note). No camera restart.
+  func applyJarvis(_ newSettings: JarvisSettings) {
+    jarvisSettings = newSettings
+    newSettings.save()
+  }
+
+  /// Encodes the current preview frame as JPEG and POSTs it to the Jarvis webhook.
+  func sendToJarvis() {
+    guard !isSendingToJarvis else { return }
+    guard let frame = currentFrame else {
+      showJarvisToast("No frame to send yet.")
+      return
+    }
+    guard !jarvisSettings.serverURL.isEmpty else {
+      showJarvisToast("Set the Jarvis server URL in Settings.")
+      return
+    }
+    isSendingToJarvis = true
+    let jpeg = frame.jpegData(compressionQuality: 0.8)
+    let settings = jarvisSettings
+    Task {
+      defer { isSendingToJarvis = false }
+      do {
+        guard let jpeg else { throw JarvisSinkError.encoding }
+        try await JarvisSink.send(jpeg: jpeg, settings: settings)
+        showJarvisToast("Sent to Jarvis")
+      } catch {
+        showJarvisToast("Jarvis: \(error.localizedDescription)")
+      }
+    }
+  }
+
+  private func showJarvisToast(_ text: String) {
+    jarvisToast = text
+    jarvisToastTask?.cancel()
+    jarvisToastTask = Task {
+      try? await Task.sleep(for: .seconds(3))
+      guard !Task.isCancelled else { return }
+      jarvisToast = nil
+    }
   }
 
   // MARK: - State machine

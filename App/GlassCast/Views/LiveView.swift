@@ -133,6 +133,11 @@ private struct ControlsOverlay: View {
         Banner(text: message)
           .padding(.bottom, 12)
       }
+      if let toast = viewModel.jarvisToast {
+        Banner(text: toast)
+          .padding(.bottom, 12)
+          .transition(.opacity)
+      }
       updateButtons
       bottomBar
     }
@@ -208,6 +213,11 @@ private struct ControlsOverlay: View {
         .buttonStyle(.borderedProminent)
         .tint(viewModel.wantsLive ? Color.red : Color.accentColor)
         .clipShape(Capsule())
+        RoundIconButton(systemImage: "paperplane.fill", label: "Send to Jarvis") {
+          viewModel.sendToJarvis()
+        }
+        .disabled(viewModel.currentFrame == nil || viewModel.isSendingToJarvis)
+        .opacity(viewModel.currentFrame == nil || viewModel.isSendingToJarvis ? 0.4 : 1)
         RoundIconButton(systemImage: "slider.horizontal.3", label: "Stream settings") {
           showSettings = true
         }
